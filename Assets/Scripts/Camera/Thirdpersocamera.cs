@@ -16,10 +16,19 @@ public class Thirdpersocamera : NetworkBehaviour
     public float verticalSpeed = 1.0f;
 
     [Header("視角限制（角度，正值）")]
-    [Tooltip("最高仰角，滑鼠往上最多看幾度（建議 60~80）")]
+    [Tooltip("最高仰角，建議 60~80")]
     public float TopClamp = 70.0f;
-    [Tooltip("最大俯角，滑鼠往下最多看幾度（建議 20~35，太大相機會貼近角色）")]
+    [Tooltip("最大俯角，建議 20~35，太大相機會貼近角色")]
     public float BottomClamp = 25.0f;
+
+    [Header("垂直視角細調")]
+    [Range(0.05f, 1.0f)]
+    [Tooltip("往下看的靈敏度倍率：0.3 = 需要移動 3 倍距離才能達到相同俯角")]
+    public float downwardSpeedScale = 0.3f;
+
+    [Range(0f, 0.8f)]
+    [Tooltip("接近俯角極限的哪個比例開始漸緩：0.33 = 最後三分之一會慢慢停")]
+    public float bottomSoftZone = 0.33f;
 
     [Header("控制選項")]
     public bool invertY = false;
@@ -73,17 +82,29 @@ public class Thirdpersocamera : NetworkBehaviour
         if (_smoothedLook.sqrMagnitude >= _threshold)
         {
             float yawInput   =  _smoothedLook.x * horizontalSpeed * mouseSensitivity;
-            float pitchInput = -_smoothedLook.y * verticalSpeed   * mouseSensitivity; // 負號修正：滑鼠上 → 仰視
+            float pitchInput = -_smoothedLook.y * verticalSpeed   * mouseSensitivity;
 
             if (invertY) pitchInput = -pitchInput;
+
+            if (pitchInput > 0f) // 往下看
+            {
+                // 縮減往下的靈敏度
+                pitchInput *= downwardSpeedScale;
+
+                // 接近俯角極限時漸漸減速（soft stop）
+                float softStart = BottomClamp * (1f - bottomSoftZone);
+                if (_cinemachineTargetPitch > softStart && BottomClamp > softStart)
+                {
+                    float t = Mathf.Clamp01((_cinemachineTargetPitch - softStart) / (BottomClamp - softStart));
+                    pitchInput *= 1f - t;
+                }
+            }
 
             _cinemachineTargetYaw   += yawInput;
             _cinemachineTargetPitch += pitchInput;
         }
 
-        _cinemachineTargetYaw = NormalizeAngle(_cinemachineTargetYaw);
-
-        // 仰角 = 負值（-TopClamp）；俯角 = 正值（+BottomClamp）
+        _cinemachineTargetYaw   = NormalizeAngle(_cinemachineTargetYaw);
         _cinemachineTargetPitch = Mathf.Clamp(_cinemachineTargetPitch, -TopClamp, BottomClamp);
 
         if (CameraTarget != null)
