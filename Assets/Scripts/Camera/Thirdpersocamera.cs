@@ -15,29 +15,21 @@ public class Thirdpersocamera : NetworkBehaviour
     [Range(0.1f, 3.0f)]
     public float verticalSpeed = 1.0f;
 
-    [Header("視角限制（角度，正值）")]
-    [Tooltip("最高仰角，建議 60~80")]
+    [Header("視角限制")]
     public float TopClamp = 70.0f;
-    [Tooltip("最大俯角，建議 20~35，太大相機會貼近角色")]
-    public float BottomClamp = 25.0f;
+    public float BottomClamp = -50.0f;
 
-    [Header("垂直視角細調")]
-    [Range(0.05f, 1.0f)]
-    [Tooltip("往下看的靈敏度倍率：0.3 = 需要移動 3 倍距離才能達到相同俯角")]
-    public float downwardSpeedScale = 0.3f;
-
-    [Range(0f, 0.8f)]
-    [Tooltip("接近俯角極限的哪個比例開始漸緩：0.33 = 最後三分之一會慢慢停")]
-    public float bottomSoftZone = 0.33f;
+    [Header("預設俯仰角（正值 = 往下看，建議 10~25）")]
+    public float defaultPitch = 15.0f;
 
     [Header("控制選項")]
     public bool invertY = false;
 
-    [Header("靈敏度縮放（預設 0.05 接近 InputAction 手感）")]
+    [Header("靈敏度縮放（Mouse.delta 是像素值，預設 0.05 接近原本 InputAction 的手感）")]
     [Range(0.01f, 0.2f)]
     public float deltaScale = 0.05f;
 
-    [Header("輸入平滑（0 = 不平滑，0.08 接近 Slerp 手感）")]
+    [Header("輸入平滑（0 = 不平滑，0.08 接近原本 Slerp 的跟手感）")]
     [Range(0f, 0.15f)]
     public float inputSmoothTime = 0.08f;
 
@@ -53,6 +45,9 @@ public class Thirdpersocamera : NetworkBehaviour
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
 
+        // 初始往下看的角度，讓相機從高處斜向注視角色
+        _cinemachineTargetPitch = defaultPitch;
+
         if (CameraHandler.Instance != null)
             CameraHandler.Instance.SetTarget(CameraTarget.transform);
         else
@@ -63,58 +58,34 @@ public class Thirdpersocamera : NetworkBehaviour
     {
         if (!isLocalPlayer) return;
 
-        if (Cursor.lockState != CursorLockMode.Locked)
-        {
-            _look = Vector2.zero;
-            _smoothedLook = Vector2.zero;
-            _lookVelocity = Vector2.zero;
-            return;
-        }
-
-        _look = Mouse.current != null
-            ? Mouse.current.delta.ReadValue() * deltaScale
-            : Vector2.zero;
+        if (Mouse.current != null)
+            _look = Mouse.current.delta.ReadValue() * deltaScale;
 
         _smoothedLook = inputSmoothTime > 0f
-            ? Vector2.SmoothDamp(_smoothedLook, _look, ref _lookVelocity, inputSmoothTime, Mathf.Infinity, Time.deltaTime)
+            ? Vector2.SmoothDamp(_smoothedLook, _look, ref _lookVelocity, inputSmoothTime)
             : _look;
 
         if (_smoothedLook.sqrMagnitude >= _threshold)
         {
-            float yawInput   =  _smoothedLook.x * horizontalSpeed * mouseSensitivity;
-            float pitchInput = -_smoothedLook.y * verticalSpeed   * mouseSensitivity;
+            float yawInput   = _smoothedLook.x * horizontalSpeed * mouseSensitivity;
+            float pitchInput = _smoothedLook.y * verticalSpeed   * mouseSensitivity;
 
             if (invertY) pitchInput = -pitchInput;
-
-            if (pitchInput > 0f) // 往下看
-            {
-                // 縮減往下的靈敏度
-                pitchInput *= downwardSpeedScale;
-
-                // 接近俯角極限時漸漸減速（soft stop）
-                float softStart = BottomClamp * (1f - bottomSoftZone);
-                if (_cinemachineTargetPitch > softStart && BottomClamp > softStart)
-                {
-                    float t = Mathf.Clamp01((_cinemachineTargetPitch - softStart) / (BottomClamp - softStart));
-                    pitchInput *= 1f - t;
-                }
-            }
 
             _cinemachineTargetYaw   += yawInput;
             _cinemachineTargetPitch += pitchInput;
         }
 
-        _cinemachineTargetYaw   = NormalizeAngle(_cinemachineTargetYaw);
-        _cinemachineTargetPitch = Mathf.Clamp(_cinemachineTargetPitch, -TopClamp, BottomClamp);
+        _cinemachineTargetPitch = ClampAngle(_cinemachineTargetPitch, BottomClamp, TopClamp);
 
         if (CameraTarget != null)
             CameraTarget.transform.rotation = Quaternion.Euler(_cinemachineTargetPitch, _cinemachineTargetYaw, 0f);
     }
 
-    private static float NormalizeAngle(float angle)
+    private static float ClampAngle(float lfAngle, float lfMin, float lfMax)
     {
-        angle %= 360f;
-        if (angle < 0f) angle += 360f;
-        return angle;
+        if (lfAngle < -360f) lfAngle += 360f;
+        if (lfAngle > 360f)  lfAngle -= 360f;
+        return Mathf.Clamp(lfAngle, lfMin, lfMax);
     }
 }
